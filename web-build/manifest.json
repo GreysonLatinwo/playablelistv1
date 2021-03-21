@@ -1,0 +1,8 @@
+{
+  "description": "This bare project template includes a minimal setup for using unimodules, expo-dev-menu and expo-dev-launcher with React Native.",
+  "display": "standalone",
+  "lang": "en",
+  "name": "PlayableList",
+  "short_name": "PlayableList",
+  "start_url": "/?utm_source=web_app_manifest"
+}
