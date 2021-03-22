@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar";
 import React from "react";
-import { StyleSheet, Text, View, TouchableOpacity } from "react-native";
+import { StyleSheet, Text, View, TouchableOpacity, Linking, Button } from "react-native";
 import { SearchBar, Card } from 'react-native-elements';
 import * as DevMenu from "expo-dev-menu";
 import './global';
@@ -19,15 +19,27 @@ export default class App extends React.Component {
   render() {
     return (
       <View style={styles.container}>
-        <TextInput
-          style={styles.addressinput}
-          onChangeText={this.updateAddress}
-          value={this.state.playlistAddres}
-          placeholder="Playlist Eth Address">
-        </TextInput>
-        <View style={styles.card}>
-          <Playlist/>
-        </View>
+        {
+          (window.ethereum != null)
+          ?
+          <View>
+            <TextInput
+              style={styles.addressinput}
+              onChangeText={this.updateAddress}
+              value={this.state.playlistAddres}
+              placeholder="Playlist Eth Address">
+            </TextInput>
+            <View style={styles.card}>
+              <Playlist/>
+            </View>
+          </View>
+          :
+          <View>
+            <Text style={{color: "#fff", textAlign: "center"}}>Please use a Web3 Provider (that Supports the ropsten testnet)</Text>
+            <Text style={{color: "#fff", textAlign: "center"}}>i.e. Metamask or CoinBase Wallet</Text>
+            <Button title='Metamask' style={{color: "#00f", textAlign: "center", fontSize: 18}} onPress={() => Linking.openURL('https://metamask.io')}/>
+          </View>
+        }
       </View>
     );
   }
@@ -39,7 +51,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#223",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 30
+    borderRadius: 30,
+    borderWidth: 1,
+    color: "#fff"
   },
   addressinput: {
     color: "#ffffff",

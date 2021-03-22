@@ -6,9 +6,9 @@ import './global';
 const PlayableJson = require('./PlayableList.json');
 const Web3 = require('web3');
 const { ethers } = require("ethers");
-const provider = new ethers.providers.Web3Provider(window.ethereum);
-const signer = provider.getSigner(); //signer is the address on the metamask account
-const playableContract = new ethers.Contract(PlayableJson.networks['3'].address, PlayableJson.abi, signer);
+var provider;
+var signer; //signer is the address on the metamask account
+var playableContract;
 
 class Playlist extends React.Component {
     
@@ -27,7 +27,6 @@ class Playlist extends React.Component {
         }
         return "";
     }
-      
     setCookie(cname, cvalue, seconds) {
         var d = new Date();
         d.setTime(d.getTime() + (seconds * 1000));
@@ -69,10 +68,9 @@ class Playlist extends React.Component {
             accounts: [],
             playableAddress: '0xA54B25a1EA558512DEF1adD7b2b301c16051C065'
         };
-        ethereum.request({ method: 'eth_requestAccounts' })
-        .then((responseAccount) => {
-            this.state.accounts = responseAccount
-        });
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        signer = provider.getSigner();
+        playableContract = new ethers.Contract(PlayableJson.networks['3'].address, PlayableJson.abi, signer);
         this.setCookie('PlaylistAddress', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', 3600)
         if (!window.location.hash){
             this.spotifyAuth();
@@ -92,8 +90,13 @@ class Playlist extends React.Component {
             ]
         }
         playableContract.on(playableContract.filters.playlistAltered, (event) => {
-            const spotifyplaylistURL = ("https://api.spotify.com/v1/playlists/5isvshO0NjjLLsc4AOJnTY/tracks?position=" + encodeURIComponent(searchValue) + "&type=track&limit=" + searchLimit);
-            fetch(spotifysearchURL, {
+            var tempPlaylist = this.state.playlist
+            tempPlaylist.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
+            const newWeight = event.args.weight.toNumber();
+            const isLargeNumber = (element) => element.weight < newWeight;
+            var idx = tempPlaylist.findIndex(isLargeNumber)
+            const spotifyplaylistURL = ("https://api.spotify.com/v1/playlists/5isvshO0NjjLLsc4AOJnTY/tracks?position=" + idx);
+            fetch(spotifyplaylistURL, {
                 method: 'POST', 
                 headers: {
                     'Accept': 'application/json',
@@ -101,18 +104,8 @@ class Playlist extends React.Component {
                     "Authorization": "Bearer " + this.getCookie("spotifyToken")
                 },
             })
-            .then((response) => response.json())
             .then((searchResults) => {
                 console.log(searchResults);
-                let trackInfo = searchResults['tracks']["items"][0];
-                playableContract.AddSong(
-                    trackInfo['album']['uri'],
-                    trackInfo['album']['images'][0]['url'],
-                    trackInfo['track_number'],
-                    trackInfo['uri'],
-                    trackInfo['name'],
-                    trackInfo['artists'][0]['name'],
-                    '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', {value: 1000});
             })
             .catch((error) => {
                 console.error(error);
