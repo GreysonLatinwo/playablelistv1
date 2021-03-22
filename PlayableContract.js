@@ -5,7 +5,11 @@ import './global';
 
 const PlayableJson = require('./PlayableList.json');
 const Web3 = require('web3');
-var playableContract;
+const { ethers } = require("ethers");
+const provider = new ethers.providers.Web3Provider(window.ethereum);
+const signer = provider.getSigner(); //signer is the address on the metamask account
+const playableContract = new ethers.Contract(PlayableJson.networks['3'].address, PlayableJson.abi, signer);
+
 class Playlist extends React.Component {
     
     getCookie(cname) {
@@ -46,6 +50,17 @@ class Playlist extends React.Component {
         const url = `https://accounts.spotify.com/authorize?response_type=token&client_id=${my_client_id}&redirect_uri=${(redirect_uri)}&scope=${encodeURIComponent(scopes)}`
         window.location.href = url;
     }
+    updatePlaylist(){
+        playableContract.GetAll('0xA54B25a1EA558512DEF1adD7b2b301c16051C065')
+        .then((result) => {
+            var JsonResult = JSON.parse(result);
+            JsonResult.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
+            this.state.playlist = JsonResult;
+            this.setState(JsonResult);
+            console.log('ethers');
+            console.log(this.state.playlist);
+        });
+    }
     constructor(props) {
         super(props);
         // Don't call this.setState() here!
@@ -68,16 +83,41 @@ class Playlist extends React.Component {
         }
     }
     componentWillMount() {
-        const web3 = new Web3(
-            new Web3.providers.HttpProvider('https://ropsten.infura.io/v3/466820daa9c0476985e1444bb1ced01d')
-        );
-        playableContract = new web3.eth.Contract(PlayableJson.abi, PlayableJson.networks['3'].address);
-        playableContract.methods.GetAll('0xA54B25a1EA558512DEF1adD7b2b301c16051C065').call().then((result) => {
-            var JsonResult = JSON.parse(result);
-            JsonResult.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
-            this.state.playlist = JsonResult;
-            this.setState(JsonResult)
-            console.log(this.state.playlist);
+        //initial playlist state
+        this.updatePlaylist();
+        // playlist update listener
+        var filter = {
+            topics: [
+                ethers.utils.id("playlistAltered(address,uint256,uint256,uint256,string,tring)")
+            ]
+        }
+        playableContract.on(playableContract.filters.playlistAltered, (event) => {
+            const spotifyplaylistURL = ("https://api.spotify.com/v1/playlists/5isvshO0NjjLLsc4AOJnTY/tracks?position=" + encodeURIComponent(searchValue) + "&type=track&limit=" + searchLimit);
+            fetch(spotifysearchURL, {
+                method: 'POST', 
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    "Authorization": "Bearer " + this.getCookie("spotifyToken")
+                },
+            })
+            .then((response) => response.json())
+            .then((searchResults) => {
+                console.log(searchResults);
+                let trackInfo = searchResults['tracks']["items"][0];
+                playableContract.AddSong(
+                    trackInfo['album']['uri'],
+                    trackInfo['album']['images'][0]['url'],
+                    trackInfo['track_number'],
+                    trackInfo['uri'],
+                    trackInfo['name'],
+                    trackInfo['artists'][0]['name'],
+                    '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', {value: 1000});
+            })
+            .catch((error) => {
+                console.error(error);
+            });
+            console.log(event);
         });
     }
     AddSong(searchValue){
@@ -95,20 +135,18 @@ class Playlist extends React.Component {
         .then((searchResults) => {
             console.log(searchResults);
             let trackInfo = searchResults['tracks']["items"][0];
-            playableContract.methods.AddSong(
+            playableContract.AddSong(
                 trackInfo['album']['uri'],
                 trackInfo['album']['images'][0]['url'],
                 trackInfo['track_number'],
                 trackInfo['uri'],
                 trackInfo['name'],
                 trackInfo['artists'][0]['name'],
-                '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065')
-            .send({ from: this.state.accounts[0], value: 1000})
+                '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', {value: 1000});
         })
         .catch((error) => {
             console.error(error);
         });
-        
     }
     SpotifyPlay(playlistIdx){
         const spotifyPlaylistID = 'spotify:playlist:5isvshO0NjjLLsc4AOJnTY';
@@ -145,7 +183,6 @@ class Playlist extends React.Component {
                     />
                     {this.state.playlist.map(({ songID, trackName, trackURI, albumImage, artist }, currIdx) => (
                         <React.Fragment key={songID}>
-                            
                             <TouchableOpacity
                                 accessibilityRole={'button'}
                                 style={styles.linkContainer}
