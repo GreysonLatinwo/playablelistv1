@@ -7,6 +7,7 @@ const PlayableJson = require('./PlayableList.json');
 const Web3 = require('web3');
 var playableContract;
 class Playlist extends React.Component {
+    
     getCookie(cname) {
         var name = cname + "=";
         var decodedCookie = decodeURIComponent(document.cookie);
@@ -49,8 +50,14 @@ class Playlist extends React.Component {
         super(props);
         // Don't call this.setState() here!
         this.state = {
-            playlist: []
+            playlist: [],
+            accounts: [],
+            playableAddress: '0xA54B25a1EA558512DEF1adD7b2b301c16051C065'
         };
+        ethereum.request({ method: 'eth_requestAccounts' })
+        .then((responseAccount) => {
+            this.state.accounts = responseAccount
+        });
         this.setCookie('PlaylistAddress', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', 3600)
         if (!window.location.hash){
             this.spotifyAuth();
@@ -61,13 +68,10 @@ class Playlist extends React.Component {
         }
     }
     componentWillMount() {
-        web3 = new Web3(
+        const web3 = new Web3(
             new Web3.providers.HttpProvider('https://ropsten.infura.io/v3/466820daa9c0476985e1444bb1ced01d')
         );
-        playableContract = new web3.eth.Contract(PlayableJson.abi, PlayableJson.networks['3'].address, {
-            from: '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', // contract address
-            gasPrice: '86000000000' // default gas price in wei
-        });
+        playableContract = new web3.eth.Contract(PlayableJson.abi, PlayableJson.networks['3'].address);
         playableContract.methods.GetAll('0xA54B25a1EA558512DEF1adD7b2b301c16051C065').call().then((result) => {
             var JsonResult = JSON.parse(result);
             JsonResult.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
@@ -87,15 +91,19 @@ class Playlist extends React.Component {
                 "Authorization": "Bearer " + this.getCookie("spotifyToken")
             },
         })
+        .then((response) => response.json())
         .then((searchResults) => {
-            let trackInfo = searchResults.responseJSON['tracks']["items"][idx];
-            playableContract.methods.AddSong(trackInfo['album']['uri'],
-            trackInfo['album']['images'][0]['url'],
-            trackInfo['track_number'],
-            trackInfo['uri'],
-            trackInfo['name'],
-            trackInfo['artists'][0]['name'],
-            '', playlistID).send
+            console.log(searchResults);
+            let trackInfo = searchResults['tracks']["items"][0];
+            playableContract.methods.AddSong(
+                trackInfo['album']['uri'],
+                trackInfo['album']['images'][0]['url'],
+                trackInfo['track_number'],
+                trackInfo['uri'],
+                trackInfo['name'],
+                trackInfo['artists'][0]['name'],
+                '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065')
+            .send({ from: this.state.accounts[0], value: 1000})
         })
         .catch((error) => {
             console.error(error);
@@ -130,7 +138,11 @@ class Playlist extends React.Component {
         return (
             <React.Fragment>
                 <View style={styles.container}>
-                    <Button onPress={() => {this.AddSong('Ziplock saba')}}>Add Ziplock By Saba</Button>
+                    <Button 
+                    onPress={() => {this.AddSong('Ziplock saba')}} 
+                    title={'Add \"Ziplock\" By Saba'}
+                    color="#841584"
+                    />
                     {this.state.playlist.map(({ songID, trackName, trackURI, albumImage, artist }, currIdx) => (
                         <React.Fragment key={songID}>
                             
