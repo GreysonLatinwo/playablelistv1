@@ -78,38 +78,132 @@ class Playlist extends React.Component {
             const urlParams = window.location.hash.split('&');
             if(urlParams.length >= 3)
                 this.setCookie('spotifyToken', urlParams[0].split('=')[1], urlParams[2].split('=')[1])
+            //get user id
+            fetch(`https://api.spotify.com/v1/me`, {
+                method: "GET",
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    "Authorization": "Bearer " + this.getCookie("spotifyToken")
+                },
+                body: `{"name": "Playable List - 0xA54B25a1EA558512DEF1adD7b2b301c16051C065","description": "Playable List","public": true}`,
+                success: function (data) {
+                    console.log("Data: " + data);
+                    var userID = data.id;
+                    //check if they have the playlist and make it
+                    fetch(`https://api.spotify.com/v1/users/${userID}/playlists`, {
+                        method: "POST",
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                            "Authorization": "Bearer " + this.getCookie("spotifyToken")
+                        },
+                        body: `{"name": "Playable List - ${document.getElementById('playlist-id').value}","description": "Playable List","public": true}`,
+                        success: function (data) {
+                            console.log("Data: " + data);
+                            if (getCookie(spotifyPlaylistId) == null)
+                                setCookie('spotifyPlaylistId', data.id, 1000);
+                        }, error: function (err) {
+                            console.log(err);
+                            alert(err.responseJSON.error.message)
+                        }
+                    });
+                    setCookie(UserId, data.id, 1000);
+                }, error: function (err) {
+                    console.log(err);
+                }
+            });
         }
     }
     componentWillMount() {
         //initial playlist state
         this.updatePlaylist();
         // playlist update listener
-        var filter = {
-            topics: [
-                ethers.utils.id("playlistAltered(address,uint256,uint256,uint256,string,tring)")
-            ]
-        }
         playableContract.on(playableContract.filters.playlistAltered, (event) => {
-            var tempPlaylist = this.state.playlist
-            tempPlaylist.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
-            const newWeight = event.args.weight.toNumber();
-            const isLargeNumber = (element) => element.weight < newWeight;
-            var idx = tempPlaylist.findIndex(isLargeNumber)
-            const spotifyplaylistURL = ("https://api.spotify.com/v1/playlists/5isvshO0NjjLLsc4AOJnTY/tracks?position=" + idx);
-            fetch(spotifyplaylistURL, {
-                method: 'POST', 
+            var spotifyPlaylistID = '5isvshO0NjjLLsc4AOJnTY';
+            var JSONResults = this.state.playlist
+            JSONResults.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
+            switch (event.args.alterType) {
+            case 'add':
+                var playableTrackPosition = 0;
+                console.log('adding to playlist');
+                for (var i = 0; i < JSONResults.length; i++) {
+                    if (JSONResults[i].trackURI == event.args.trackURI) {
+                        playableTrackPosition = i;
+                        break;
+                    }
+                }
+                const spotifyplaylistURL = `https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks?position=${playableTrackPosition}`;
+                fetch(spotifyplaylistURL, {
+                method: "POST",
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                     "Authorization": "Bearer " + this.getCookie("spotifyToken")
                 },
-            })
-            .then((searchResults) => {
-                console.log(searchResults);
-            })
-            .catch((error) => {
-                console.error(error);
-            });
+                body: `{"uris": ["${event.args.trackURI}"]}`,
+                success: function (data) {
+                    console.log("Data: " + data);
+                }, error: function (err) {
+                    console.log(err);
+                    alert(err.responseJSON.error.message)
+                }
+                });
+                break;
+            case 'remove':
+                console.log('removing from playlist');
+                const putData = `{"tracks":[{"uri": "${event.returnValues.trackURI}"}]}`;
+                const spotifyURL = (`https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks`);
+                const xmlhttp = new XMLHttpRequest();
+                xmlhttp.open("DELETE", spotifyURL);
+                xmlhttp.setRequestHeader("Authorization", "Bearer " + getCookie("spotifyToken"));
+                xmlhttp.send(putData);
+                break;
+            case 'update':
+                console.log('updating playlist');
+                //get current track positions
+                $.ajax({
+                type: "GET",
+                url: `https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks`,
+                beforeSend: function (req) { req.setRequestHeader("Authorization", "Bearer " + getCookie("spotifyToken")); },
+                dataType: "json",
+                success: function (data) {
+                    console.log("Data:", data);
+                    var spotifyTrackPosition = 0;
+                    var playableTrackPosition = 0;
+                    //find track in spotify list //TODO duplicate trackURI check
+                    for(var i = 0; i < data.items.length; i++){
+                    if(data.items[i].track.uri == event.returnValues.trackURI){
+                        spotifyTrackPosition = i;
+                        break;
+                    }
+                    }
+                    for (var i = 0; i < JSONResults.length; i++) {
+                    if (JSONResults[i].trackURI == event.returnValues.trackURI){
+                        playableTrackPosition = i;
+                        break;
+                    }
+                    }
+                    $.ajax({
+                    type: "PUT",
+                    url: `https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks`,
+                    beforeSend: function (req) { req.setRequestHeader("Authorization", "Bearer " + getCookie("spotifyToken")); },
+                    dataType: "json",
+                    data: `{"range_start":${spotifyTrackPosition}, "insert_before":${playableTrackPosition}}`,
+                    success: function (data) {
+                        console.log("Data: " + data);
+                    }, error: function (err) {
+                        console.log(err);
+                        alert(err.responseJSON.error.message)
+                    }
+                    });
+                }, error: function (err) {
+                    console.log(err);
+                    alert(err.responseJSON.error.message)
+                }
+                });
+                break;
+            }
             console.log(event);
         });
     }
@@ -135,7 +229,7 @@ class Playlist extends React.Component {
                 trackInfo['uri'],
                 trackInfo['name'],
                 trackInfo['artists'][0]['name'],
-                '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', {value: 1000});
+                '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', {value: 4000});
         })
         .catch((error) => {
             console.error(error);
@@ -170,8 +264,8 @@ class Playlist extends React.Component {
             <React.Fragment>
                 <View style={styles.container}>
                     <Button 
-                    onPress={() => {this.AddSong('Ziplock saba')}} 
-                    title={'Add \"Ziplock\" By Saba'}
+                    onPress={() => {this.AddSong('get back pop smoke')}} 
+                    title={'Add \"Get Back\" By Pop smoke'}
                     color="#841584"
                     />
                     {this.state.playlist.map(({ songID, trackName, trackURI, albumImage, artist }, currIdx) => (

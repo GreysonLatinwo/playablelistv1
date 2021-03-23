@@ -23,12 +23,9 @@ export default class App extends React.Component {
           (window.ethereum != null)
           ?
           <View>
-            <TextInput
-              style={styles.addressinput}
-              onChangeText={this.updateAddress}
-              value={this.state.playlistAddres}
-              placeholder="Playlist Eth Address">
-            </TextInput>
+            <Text style={styles.addressinput}>
+              Playlist: {this.state.playlistAddres}
+            </Text>
             <View style={styles.card}>
               <Playlist/>
             </View>
