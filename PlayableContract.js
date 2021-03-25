@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar";
 import React from "react";
-import { StyleSheet, Text, View, TouchableOpacity, Image, Button } from "react-native";
+import { StyleSheet, Text, View, TouchableOpacity, Image, Button, ImageBackground} from "react-native";
 import './global';
 
 const PlayableJson = require('./PlayableList.json');
@@ -33,6 +33,9 @@ class Playlist extends React.Component {
         var expires = "expires=" + d.toUTCString();
         document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
     }
+    setModalVisible(visible) {
+        this.setState({ modalVisible: visible });
+    }
     spotifyAuth() {
         const my_client_id = '9c51eed9e4534dc3b3711c58b43c13c9';
         const scopes = `playlist-read-collaborative 
@@ -44,10 +47,39 @@ class Playlist extends React.Component {
                 user-read-private 
                 user-modify-playback-state
                 user-read-playback-state
-                ugc-image-upload`;
+                ugc-image-upload
+                user-read-currently-playing`;
         const redirect_uri = window.location.origin;
         const url = `https://accounts.spotify.com/authorize?response_type=token&client_id=${my_client_id}&redirect_uri=${(redirect_uri)}&scope=${encodeURIComponent(scopes)}`
         window.location.href = url;
+    }
+    spotifySDKCallback = () => {
+        window.onSpotifyWebPlaybackSDKReady = () => {
+            const token = this.getCookie('spotifyToken');
+            const spotifyPlayer = new Spotify.Player({
+                name: 'Playable v2',
+                getOAuthToken: cb => { cb(token); }
+            });
+            
+            spotifyPlayer.addListener('player_state_changed', state => {
+                console.log(state);
+                var currentSong = null
+                if(state){
+                    currentSong = {
+                        title: state.track_window.current_track.name,
+                        artist: state.track_window.current_track.artists[0].name,
+                        image: state.track_window.current_track.album.images[2].url,
+                    }
+                }
+
+                //do things when the state changes
+                
+                this.setState({currentSong})
+            });
+            // add event listeners to the player
+            this.setState({spotifyPlayer});
+            spotifyPlayer.connect()
+        }
     }
     updatePlaylist(){
         playableContract.GetAll('0xA54B25a1EA558512DEF1adD7b2b301c16051C065')
@@ -56,8 +88,38 @@ class Playlist extends React.Component {
             JsonResult.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
             this.state.playlist = JsonResult;
             this.setState(JsonResult);
-            console.log('ethers');
             console.log(this.state.playlist);
+        });
+    }
+    updateSpotify(){
+        playableContract.GetAll(this.getCookie('PlaylistAddress'))
+        .then((result) => {
+            var JSONResults = JSON.parse(result);
+            JSONResults.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
+            var tracks2add = `{"uris": [`;
+            for (let index = 0; index < JSONResults.length; index++) {
+                if (index == JSONResults.length - 1)
+                tracks2add += `"${JSONResults[index].trackURI}"`;
+                else
+                tracks2add += `"${JSONResults[index].trackURI}", `;
+            }
+            tracks2add += `]}`;
+            var JSONtracks2add = JSON.parse(tracks2add);
+            fetch(`https://api.spotify.com/v1/playlists/${this.getCookie('spotifyPlaylistId')}/tracks`, {
+                method: "POST",
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    "Authorization": "Bearer " + this.getCookie("spotifyToken")
+                },
+                body: tracks2add
+            })
+            .then((data) => {
+                console.log(data);
+            })
+            .catch((error) => {
+                console.warn(error);
+            });
         });
     }
     constructor(props) {
@@ -66,8 +128,13 @@ class Playlist extends React.Component {
         this.state = {
             playlist: [],
             accounts: [],
-            playableAddress: '0xA54B25a1EA558512DEF1adD7b2b301c16051C065'
+            playableAddress: '0xA54B25a1EA558512DEF1adD7b2b301c16051C065',
+            addModalVisibility: false,
         };
+        window.ethereum.request({ method: 'eth_requestAccounts' }).then(() => {
+            this.updatePlaylist();
+        });
+        
         provider = new ethers.providers.Web3Provider(window.ethereum);
         signer = provider.getSigner();
         playableContract = new ethers.Contract(PlayableJson.networks['3'].address, PlayableJson.abi, signer);
@@ -78,49 +145,35 @@ class Playlist extends React.Component {
             const urlParams = window.location.hash.split('&');
             if(urlParams.length >= 3)
                 this.setCookie('spotifyToken', urlParams[0].split('=')[1], urlParams[2].split('=')[1])
-            //get user id
-            fetch(`https://api.spotify.com/v1/me`, {
-                method: "GET",
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    "Authorization": "Bearer " + this.getCookie("spotifyToken")
-                },
-                body: `{"name": "Playable List - 0xA54B25a1EA558512DEF1adD7b2b301c16051C065","description": "Playable List","public": true}`,
-                success: function (data) {
-                    console.log("Data: " + data);
-                    var userID = data.id;
-                    //check if they have the playlist and make it
-                    fetch(`https://api.spotify.com/v1/users/${userID}/playlists`, {
-                        method: "POST",
-                        headers: {
-                            'Accept': 'application/json',
-                            'Content-Type': 'application/json',
-                            "Authorization": "Bearer " + this.getCookie("spotifyToken")
-                        },
-                        body: `{"name": "Playable List - ${document.getElementById('playlist-id').value}","description": "Playable List","public": true}`,
-                        success: function (data) {
-                            console.log("Data: " + data);
-                            if (getCookie(spotifyPlaylistId) == null)
-                                setCookie('spotifyPlaylistId', data.id, 1000);
-                        }, error: function (err) {
-                            console.log(err);
-                            alert(err.responseJSON.error.message)
-                        }
-                    });
-                    setCookie(UserId, data.id, 1000);
-                }, error: function (err) {
-                    console.log(err);
-                }
-            });
         }
     }
     componentWillMount() {
         //initial playlist state
         this.updatePlaylist();
+        fetch(`https://api.spotify.com/v1/me/playlists`, {
+            method: "GET",
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                "Authorization": "Bearer " + this.getCookie("spotifyToken")
+            }
+        })
+        .then((response) => response.json())
+        .then((spotifyPlaylist) => {
+            if(spotifyPlaylist.error){
+                return;
+            }
+            console.log(spotifyPlaylist);
+            var spotifyPlaylistIdCookie = this.getCookie('spotifyPlaylistId');
+            const playablelistFunc = (playlist) => playlist.name == `Playable List - ${this.getCookie('PlaylistAddress')}`
+            var idx = spotifyPlaylist.items.findIndex(playablelistFunc);
+            if (spotifyPlaylistIdCookie == null || spotifyPlaylistIdCookie !== spotifyPlaylist.items[idx].id){
+                this.setCookie('spotifyPlaylistId', spotifyPlaylist.items[idx].id, 3600);
+            }
+        });
         // playlist update listener
         playableContract.on(playableContract.filters.playlistAltered, (event) => {
-            var spotifyPlaylistID = '5isvshO0NjjLLsc4AOJnTY';
+            var spotifyPlaylistID = this.getCookie('spotifyPlaylistId');
             var JSONResults = this.state.playlist
             JSONResults.sort((a, b) => parseInt(b['weight']) - parseInt(a['weight']));
             switch (event.args.alterType) {
@@ -135,77 +188,101 @@ class Playlist extends React.Component {
                 }
                 const spotifyplaylistURL = `https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks?position=${playableTrackPosition}`;
                 fetch(spotifyplaylistURL, {
-                method: "POST",
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    "Authorization": "Bearer " + this.getCookie("spotifyToken")
-                },
-                body: `{"uris": ["${event.args.trackURI}"]}`,
-                success: function (data) {
-                    console.log("Data: " + data);
-                }, error: function (err) {
+                    method: "POST",
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        "Authorization": "Bearer " + this.getCookie("spotifyToken")
+                    },
+                    body: `{"uris": ["${event.args.trackURI}"]}`
+                })
+                .then((response) => response.json())
+                .then((data) => {
+                    console.log(data);
+                })
+                .catch((err) => {
                     console.log(err);
                     alert(err.responseJSON.error.message)
-                }
                 });
                 break;
+            //Todo
             case 'remove':
                 console.log('removing from playlist');
-                const putData = `{"tracks":[{"uri": "${event.returnValues.trackURI}"}]}`;
+                const putData = `{"tracks":[{"uri": "${event.trackURI}"}]}`;
                 const spotifyURL = (`https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks`);
-                const xmlhttp = new XMLHttpRequest();
-                xmlhttp.open("DELETE", spotifyURL);
-                xmlhttp.setRequestHeader("Authorization", "Bearer " + getCookie("spotifyToken"));
-                xmlhttp.send(putData);
+                fetch(spotifyURL, {
+                    method: "DELETE",
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        "Authorization": "Bearer " + this.getCookie("spotifyToken")
+                    },
+                    body: putData
+                })
+                .then((response) => response.json())
+                .then((data) => {
+                    console.log(data);
+                })
+                .catch((err) => {
+                    console.log(err);
+                    alert(err.responseJSON.error.message)
+                });
                 break;
+            //Todo
             case 'update':
                 console.log('updating playlist');
                 //get current track positions
-                $.ajax({
-                type: "GET",
-                url: `https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks`,
-                beforeSend: function (req) { req.setRequestHeader("Authorization", "Bearer " + getCookie("spotifyToken")); },
-                dataType: "json",
-                success: function (data) {
+                fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks`, {
+                    method: "GET",
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        "Authorization": "Bearer " + this.getCookie("spotifyToken")
+                    }
+                })
+                .then((data) => {
                     console.log("Data:", data);
                     var spotifyTrackPosition = 0;
-                    var playableTrackPosition = 0;
                     //find track in spotify list //TODO duplicate trackURI check
                     for(var i = 0; i < data.items.length; i++){
-                    if(data.items[i].track.uri == event.returnValues.trackURI){
-                        spotifyTrackPosition = i;
-                        break;
+                        if(data.items[i].track.uri == event.returnValues.trackURI){
+                            spotifyTrackPosition = i;
+                            break;
+                        }
                     }
-                    }
-                    for (var i = 0; i < JSONResults.length; i++) {
-                    if (JSONResults[i].trackURI == event.returnValues.trackURI){
-                        playableTrackPosition = i;
-                        break;
-                    }
-                    }
-                    $.ajax({
-                    type: "PUT",
-                    url: `https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks`,
-                    beforeSend: function (req) { req.setRequestHeader("Authorization", "Bearer " + getCookie("spotifyToken")); },
-                    dataType: "json",
-                    data: `{"range_start":${spotifyTrackPosition}, "insert_before":${playableTrackPosition}}`,
-                    success: function (data) {
+                    fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylistID}/tracks`, {
+                        method: "PUT",
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                            "Authorization": "Bearer " + this.getCookie("spotifyToken")
+                        },
+                        body: `{"range_start":${spotifyTrackPosition}, "insert_before":${playableTrackPosition}}`
+                    })
+                    .then((data) => {
                         console.log("Data: " + data);
-                    }, error: function (err) {
+                    })
+                    .catch((err) => {
                         console.log(err);
                         alert(err.responseJSON.error.message)
-                    }
-                    });
-                }, error: function (err) {
+                    })
+                })
+                .catch((err) => {
                     console.log(err);
                     alert(err.responseJSON.error.message)
-                }
-                });
+                })
                 break;
             }
             console.log(event);
+            this.updateSpotify();
         });
+    }
+    componentDidMount(){
+        const script = document.createElement("script");
+        script.src = "https://sdk.scdn.co/spotify-player.js";
+        script.async = true;
+        script.onload = this.spotifySDKCallback;
+        document.body.appendChild(script);
     }
     AddSong(searchValue){
         var searchLimit = 5;
@@ -229,19 +306,16 @@ class Playlist extends React.Component {
                 trackInfo['uri'],
                 trackInfo['name'],
                 trackInfo['artists'][0]['name'],
-                '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', {value: 4000});
+                '', '0xA54B25a1EA558512DEF1adD7b2b301c16051C065', {value: 4000})
+                .then(result => {
+                    console.log(result);
+                });
         })
         .catch((error) => {
             console.error(error);
         });
     }
     SpotifyPlay(playlistIdx){
-        const spotifyPlaylistID = 'spotify:playlist:5isvshO0NjjLLsc4AOJnTY';
-        console.log(JSON.stringify({
-            'context_uri': 'spotify:playlist:5isvshO0NjjLLsc4AOJnTY',
-            'offset':{'position': `${this.state.playlist[playlistIdx]['trackIndex']}`},
-            'position_ms': '0'
-        }));
         fetch('https://api.spotify.com/v1/me/player/play', {
             method: 'PUT', 
             headers: {
@@ -249,11 +323,11 @@ class Playlist extends React.Component {
                 'Content-Type': 'application/json',
                 "Authorization": "Bearer " + this.getCookie("spotifyToken")
             },
-            body: `{\"context_uri\":\"spotify:playlist:5isvshO0NjjLLsc4AOJnTY\",\"offset\":{\"position\":${playlistIdx}},\"position_ms\":0}`,
+            body: `{\"context_uri\":\"spotify:playlist:${this.getCookie('spotifyPlaylistId')}\",\"offset\":{\"position\":${playlistIdx}},\"position_ms\":0}`,
         })
         .then((response) => response.json())
         .then((responseJson) => {
-            responseJson
+            console.log(responseJson);
         })
         .catch((error) => {
             console.warn(error);
@@ -264,11 +338,30 @@ class Playlist extends React.Component {
             <React.Fragment>
                 <View style={styles.container}>
                     <Button 
-                    onPress={() => {this.AddSong('get back pop smoke')}} 
-                    title={'Add \"Get Back\" By Pop smoke'}
+                    onPress={() => {this.AddSong('skegee jid')}} 
+                    title={'Add skegee jid'}
                     color="#841584"
                     />
-                    {this.state.playlist.map(({ songID, trackName, trackURI, albumImage, artist }, currIdx) => (
+                    {
+                        this.state.currentSong &&
+                        <View style={{borderWidth: 1, height: 320}}>
+                            <ImageBackground
+                                style={{resizeMode: 'cover', height: 320}}
+                                source={{
+                                    uri: this.state.currentSong.image,
+                                }}> 
+                                <View style={{backgroundColor: '#222', borderRadius: 20, opacity: 0.8}}>
+                                    <Text style={styles.title}>
+                                        {this.state.currentSong.title + '\n'}
+                                        <Text style={styles.artist}>
+                                            {this.state.currentSong.artist}
+                                        </Text>
+                                    </Text>
+                                </View>
+                            </ImageBackground>
+                        </View>
+                    }
+                    {this.state.playlist.map(({ songID, trackName, albumImage, artist }, currIdx) => (
                         <React.Fragment key={songID}>
                             <TouchableOpacity
                                 accessibilityRole={'button'}
@@ -295,6 +388,42 @@ class Playlist extends React.Component {
     }
 }
 const styles = StyleSheet.create({
+    modalView: {
+        margin: 20,
+        backgroundColor: "white",
+        borderRadius: 20,
+        padding: 35,
+        alignItems: "center",
+        shadowColor: "#000",
+        shadowOffset: {
+          width: 0,
+          height: 2
+        },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 5
+      },
+      button: {
+        borderRadius: 20,
+        padding: 10,
+        elevation: 2
+      },
+      buttonOpen: {
+        backgroundColor: "#F194FF",
+      },
+      buttonClose: {
+        backgroundColor: "#2196F3",
+      },
+      textStyle: {
+        color: "white",
+        fontWeight: "bold",
+        textAlign: "center"
+      },
+      modalText: {
+        marginBottom: 15,
+        textAlign: "center"
+      }
+      ,
     container: {
         marginTop: 32,
         paddingHorizontal: 24,
